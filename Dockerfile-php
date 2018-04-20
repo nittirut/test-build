@@ -1,0 +1,103 @@
+FROM php:7.2-fpm
+
+ENV  ENVIRONMENT production
+
+RUN echo "[php] \ndata.timezone = Asia/Bangkok" >> /usr/local/etc/php/php.ini
+RUN apt-get update && apt-get install -y \
+        libfreetype6-dev \
+        libjpeg62-turbo-dev \
+        libmcrypt-dev \
+        libpng-dev \
+         zlib1g-dev\
+         libmemcached-dev \
+          libmemcached11 \
+           git \
+    && docker-php-ext-install -j$(nproc) iconv  \
+    && docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ \
+    && docker-php-ext-install -j$(nproc) gd \
+    && docker-php-ext-install mysqli \
+    &&  docker-php-ext-install json
+
+RUN curl -L -o /tmp/memcached.tar.gz "https://github.com/php-memcached-dev/php-memcached/archive/php7.tar.gz" \
+    && mkdir -p /usr/src/php/ext/memcached \
+    && tar -C /usr/src/php/ext/memcached -zxvf /tmp/memcached.tar.gz --strip 1 \
+    && docker-php-ext-configure memcached \
+    && docker-php-ext-install memcached \
+    && rm /tmp/memcached.tar.gz \
+    && mkdir -p /usr/src/php/ext/redis \
+    && curl -L https://github.com/phpredis/phpredis/archive/3.0.0.tar.gz | tar xvz -C /usr/src/php/ext/redis --strip 1 \
+    && echo 'redis' >> /usr/src/php-available-exts \
+    && docker-php-ext-install redis
+
+
+RUN \
+    cd ${HOME} && \
+    git clone https://github.com/phalcon/cphalcon.git && \
+    cd cphalcon/build/php7/64bits && \
+    phpize && \
+    export CFLAGS="-O2 -g" && \
+    ./configure && \
+    make && make install && \
+    docker-php-ext-enable phalcon && \
+    rm -rf ${HOME}/cphalcon
+
+   
+RUN pecl install mcrypt-1.0.1 \
+&& docker-php-ext-enable mcrypt
+
+# install apcu
+RUN pecl install apcu \
+    && docker-php-ext-enable apcu
+
+#install Imagemagick & PHP Imagick ext
+RUN  apt-get install -y \
+        libmagickwand-dev --no-install-recommends
+
+RUN pecl install imagick && docker-php-ext-enable imagick
+
+# install mongodb ext
+RUN pecl install mongodb \
+    && docker-php-ext-enable mongodb
+
+# install git
+RUN apt-get install git git-core -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+#install xdebug
+RUN pecl install xdebug && docker-php-ext-enable xdebug
+
+RUN sed -i -e 's/listen.*/listen = 0.0.0.0:9000/' /usr/local/etc/php-fpm.conf
+
+RUN usermod -u 1000 www-data
+
+
+
+
+
+# Install and enable PHP OPCache
+RUN docker-php-ext-install opcache && \
+    docker-php-ext-enable opcache
+
+RUN { \
+        echo 'opcache.memory_consumption=128'; \
+        echo 'opcache.interned_strings_buffer=8'; \
+        echo 'opcache.max_accelerated_files=4000'; \
+        echo 'opcache.revalidate_freq=60'; \
+        echo 'opcache.fast_shutdown=1'; \
+        echo 'opcache.enable_cli=1'; \
+    } > /usr/local/etc/php/conf.d/opcache-recommended.ini
+
+RUN echo "realpath_cache_size = 4096k; realpath_cache_ttl = 7200;" > /usr/local/etc/php/conf.d/php.ini
+# composer
+
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer && \
+    composer --version
+
+#COPY ./index.php /var/www/html/index.php
+VOLUME ["/var/www/html"]
+
+EXPOSE 80 443
+
+CMD ["php-fpm"]
+
